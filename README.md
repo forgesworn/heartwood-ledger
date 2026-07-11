@@ -1,6 +1,7 @@
 # heartwood-ledger
 
-> **Proof of concept.** Part of the [ForgeSworn identity stack](https://github.com/forgesworn) — the
+> **Working prototype — emulator-proven, not yet bench-tested on hardware.** Part of the
+> [ForgeSworn identity stack](https://github.com/forgesworn) — the
 > [Heartwood](https://github.com/forgesworn/heartwood) hardware Nostr signer, running as a
 > [Ledger](https://developers.ledger.com/) embedded app instead of an ESP32/ESP8266.
 
@@ -49,20 +50,39 @@ cd host && cargo run
 
 The driver asserts, in order: derivation matches the frozen vector (identity interop), a full
 NIP-46 `get_public_key` round trip (envelope BIP-340 signature + NIP-44 verified), `sign_event` as
-master, and persona derive/switch/sign matching host-side `heartwood-common` derivation.
+master **gated by the on-device TOFU approval** (the driver walks Speculos's buttons to Approve),
+persona derive/switch/sign with **no buttons pressed** (proving the TOFU grant), and an unknown
+client's signing request **rejected on-device** (signed denial envelope).
 
-## PoC caveats — read before trusting it with anything
+## Signing policy
 
-- **Auto-approves `sign_event`.** No per-event confirmation screen and no port of the device policy
-  engine (TOFU client approval, kind allowlists, rate limits) yet. Both are required before this
-  goes near real keys or Ledger review.
-- **Curve maths in app RAM.** Signing/ECDH use pure-Rust `k256`, like the ESP8266 build — not the
-  secure element's `cx_ecschnorr`/`cx_ecdh` syscalls. Swapping the backend is the planned hardening
-  step (the seams are `src/crypto.rs` and a future `ledger-backend` feature in `heartwood-common`).
+The Heartwood TOFU model, on Ledger buttons: non-signing methods (`get_public_key`, NIP-44/04
+encrypt/decrypt) are the connect-safe tier and never prompt. The **first `sign_event` from an
+unknown client** blocks on an Approve/Reject choice screen showing the client npub prefix and the
+event kind; approval stores the client in app NVM and grants unattended signing thereafter — the
+bunker model. Signing itself runs on the OS's `cx_ecschnorr` syscall (the taproot path), not in
+app RAM.
+
+## Using it with the bridge
+
+`heartwood-bridge` (branch `ledger-transport`) speaks this app's APDU protocol directly:
+
+```sh
+HEARTWOOD_TRANSPORT=ledger-tcp HEARTWOOD_SERIAL_PORT=127.0.0.1:9999 heartwood-bridge
+```
+
+No `bridge.secret` — a Ledger authenticates its user (PIN) and gates signing on-device.
+
+## Remaining caveats
+
+- **Not yet run on a physical Nano S+** — sideload + bench test is the next gate. USB HID transport
+  for the bridge is likewise bench-gated (Speculos speaks TCP).
+- **Derivation and NIP-44 ECDH still use `k256` in app RAM** (signing does not). Moving them onto
+  cx syscalls means a `ledger-backend` feature in `heartwood-common` — the remaining pre-review
+  hardening step.
 - **24 KB heap** bounds the maximum event size well below the ESP32's.
 - **Sideload only** (Nano S/S+). Distribution to Nano X/Stax/Flex requires Ledger's review and a
   paid third-party security audit.
-- Placeholder icon (Ledger's boilerplate crab).
 
 ## Licence
 

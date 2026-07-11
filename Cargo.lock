@@ -364,6 +364,7 @@ dependencies = [
  "heartwood-common",
  "k256",
  "ledger_device_sdk",
+ "ledger_secure_sdk_sys",
  "png",
  "serde_json",
  "zeroize",
