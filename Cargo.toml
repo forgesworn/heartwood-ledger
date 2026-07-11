@@ -29,8 +29,8 @@ curve = ["secp256k1"]
 flags = "0"
 path = ["44'/1237'"]
 name = "Heartwood"
-nanosplus = { icon = "icons/crab_14x14.gif" }
-nanox = { icon = "icons/crab_14x14.gif" }
+nanosplus = { icon = "icons/heartwood_14x14.gif" }
+nanox = { icon = "icons/heartwood_14x14.gif" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p", "stax", "flex", "nanos", "nanox", "nanosplus"))'] }
