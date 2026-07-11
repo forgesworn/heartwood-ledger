@@ -1,0 +1,6 @@
+target/
+host/target/
+glyphs/*.png
+*.apdu
+*.hex
+.idea/

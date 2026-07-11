@@ -1,0 +1,36 @@
+[package]
+name = "heartwood-ledger"
+version = "0.1.0"
+edition = "2021"
+description = "Heartwood Nostr signer as a Ledger embedded app — NIP-46 dispatch, NIP-44, nsec-tree personas on the secure element's seed"
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+ledger_device_sdk = { version = "*", features = ["io_new"] }
+heartwood-common = { path = "../heartwood-esp32/common", default-features = false, features = ["k256-backend", "nip44", "nip46"] }
+k256 = { version = "0.13", default-features = false, features = ["schnorr", "arithmetic", "ecdh"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+zeroize = { version = "1", default-features = false }
+
+[build-dependencies]
+# Decode the source GIFs and write the processed grayscale PNG glyph without
+# pulling the full `image` crate (same approach as Ledger's Rust boilerplate).
+gif = "0.14"
+png = "0.18"
+
+[features]
+default = ["ledger_device_sdk/nano_nbgl"]
+debug = ["ledger_device_sdk/debug"]
+
+[package.metadata.ledger]
+curve = ["secp256k1"]
+flags = "0"
+path = ["44'/1237'"]
+name = "Heartwood"
+nanosplus = { icon = "icons/crab_14x14.gif" }
+nanox = { icon = "icons/crab_14x14.gif" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p", "stax", "flex", "nanos", "nanox", "nanosplus"))'] }

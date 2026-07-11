@@ -1,0 +1,13 @@
+[package]
+name = "heartwood-ledger-host"
+version = "0.1.0"
+edition = "2021"
+description = "Host driver: exercises the heartwood-ledger app over Speculos's TCP APDU port and verifies interop against heartwood-common"
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+heartwood-common = { path = "../../heartwood-esp32/common", default-features = false, features = ["k256-backend", "nip44", "nip46"] }
+k256 = { version = "0.13", default-features = false, features = ["schnorr", "arithmetic", "ecdh", "std"] }
+serde_json = "1"

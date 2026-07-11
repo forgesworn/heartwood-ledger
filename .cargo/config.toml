@@ -1,0 +1,18 @@
+[target.nanosplus]
+runner = "speculos -m nanosp"
+
+[build]
+target = "nanosplus"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+# Largest authorised heap: NIP-46 request JSON, its parsed form and the
+# re-encrypted response all live on the heap at once during a dispatch.
+[env]
+HEAP_SIZE = "24576"
