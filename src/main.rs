@@ -72,6 +72,7 @@ impl From<io::CommError> for AppSW {
 }
 
 /// Possible input commands received through APDUs.
+#[derive(Debug)]
 pub enum Instruction {
     GetVersion,
     GetAppName,

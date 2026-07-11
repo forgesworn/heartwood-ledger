@@ -4,22 +4,27 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_DIR="$PWD"
 WS_DIR="$(dirname "$PWD")"   # parent mount so ../heartwood-esp32/common resolves
-IMAGE="ghcr.io/ledgerhq/ledger-app-builder/ledger-app-dev-tools:latest"
+BUILDER="ghcr.io/ledgerhq/ledger-app-builder/ledger-app-builder:latest"
+SPECULOS="ghcr.io/ledgerhq/speculos:latest"
 SEED="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 ELF="target/nanosplus/release/heartwood-ledger"
 
+## Reuse the host's crate cache (populated by `cargo fetch`) so the container
+## downloads nothing — this network drops large transfers. The builder image
+## keeps CARGO_HOME at /opt/.cargo.
+CACHE="-v $HOME/.cargo/registry:/opt/.cargo/registry"
+
 echo "== build =="
-docker run --rm -v "$WS_DIR":/ws -w /ws/heartwood-ledger "$IMAGE" \
+docker run --rm -v "$WS_DIR":/ws -w /ws/heartwood-ledger $CACHE "$BUILDER" \
   cargo ledger build nanosplus
 
 echo "== speculos up =="
 docker rm -f heartwood-speculos >/dev/null 2>&1 || true
 docker run --rm -d --name heartwood-speculos \
-  -v "$WS_DIR":/ws -w /ws/heartwood-ledger -p 9999:9999 "$IMAGE" \
-  speculos --model nanosp --display headless --apdu-port 9999 \
-    --seed "$SEED" "$ELF"
+  -v "$WS_DIR":/ws -p 9999:9999 "$SPECULOS" \
+  --model nanosp --display headless --apdu-port 9999 \
+  --seed "$SEED" "/ws/heartwood-ledger/$ELF"
 trap 'docker rm -f heartwood-speculos >/dev/null 2>&1 || true' EXIT
 
 # Wait for the APDU port to accept connections.
