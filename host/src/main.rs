@@ -14,13 +14,18 @@
 //!   2. A full NIP-46 `get_public_key` round trip: NIP-44 encrypt on host,
 //!      decrypt+dispatch+re-encrypt+sign on device, envelope BIP-340 signature
 //!      verifies, response decrypts to the master pubkey.
-//!   3. `sign_event` as master: inner event id + BIP-340 signature verify.
+//!   3. `sign_event` as master — gated by the on-device TOFU approval: the
+//!      driver walks Speculos's buttons to Approve, then the event verifies.
 //!   4. nsec-tree personas: `heartwood_derive_persona` + `heartwood_switch` +
-//!      `sign_event` signs as the persona, whose key matches host-side
-//!      heartwood-common derivation byte-for-byte.
+//!      `sign_event` signs as the persona — with NO button pressing, proving
+//!      the client is now TOFU-authorised for unattended signing.
+//!   5. A second, unknown client's `sign_event` is Rejected on-device and
+//!      receives the signed "denied at device" error envelope.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::thread;
+use std::time::Duration;
 
 use heartwood_common::derive::{create_tree_root, derive};
 use heartwood_common::encoding::encode_npub;
@@ -38,12 +43,76 @@ const CLIENT_SECRET: [u8; 32] = [7u8; 32];
 const CREATED_AT: u64 = 1_752_000_000;
 const CHUNK: usize = 250;
 
+/// Minimal client for Speculos's REST automation API (default port 5000):
+/// read the current screen's text, press buttons.
+mod automation {
+    use super::*;
+
+    fn api_addr() -> String {
+        std::env::var("SPECULOS_API").unwrap_or_else(|_| "127.0.0.1:5000".into())
+    }
+
+    fn http(method: &str, path: &str, body: Option<&str>) -> String {
+        let addr = api_addr();
+        let mut s = TcpStream::connect(&addr).unwrap_or_else(|e| panic!("connect {addr}: {e}"));
+        let body = body.unwrap_or("");
+        let req = format!(
+            "{method} {path} HTTP/1.1\r\nHost: speculos\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        s.write_all(req.as_bytes()).expect("api write");
+        let mut resp = String::new();
+        let _ = s.read_to_string(&mut resp);
+        resp
+    }
+
+    fn current_screen() -> String {
+        http("GET", "/events?currentscreenonly=true", None)
+    }
+
+    fn press(button: &str) {
+        http(
+            "POST",
+            &format!("/button/{button}"),
+            Some(r#"{"action":"press-and-release"}"#),
+        );
+        thread::sleep(Duration::from_millis(350));
+    }
+
+    /// Background clicker: wait for the approval prompt, navigate right until
+    /// the page shows `target` ("Approve" / "Reject"), select it with both.
+    pub fn resolve_prompt(target: &'static str) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            for _ in 0..100 {
+                if current_screen().contains("Approve signer") {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            for _ in 0..8 {
+                press("right");
+                let s = current_screen();
+                if s.contains(target) && !s.contains("Approve signer") {
+                    press("both");
+                    return;
+                }
+            }
+            panic!("never reached the {target} page of the approval prompt");
+        })
+    }
+}
+
 struct Speculos(TcpStream);
 
 impl Speculos {
     fn connect() -> Self {
         let addr = std::env::var("SPECULOS_ADDR").unwrap_or_else(|_| "127.0.0.1:9999".into());
-        Speculos(TcpStream::connect(&addr).unwrap_or_else(|e| panic!("connect {addr}: {e}")))
+        let s = TcpStream::connect(&addr).unwrap_or_else(|e| panic!("connect {addr}: {e}"));
+        // A wedged approval prompt would block the APDU exchange forever;
+        // fail loudly instead.
+        s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+        Speculos(s)
     }
 
     /// Length-prefixed APDU exchange (ledgercomm TCP framing):
@@ -97,8 +166,14 @@ impl Speculos {
 
 /// Encrypt a NIP-46 request JSON to the device and wrap it in the 0x10 body:
 /// `[master_pk 32][client_pk 32][created_at u64-be 8][nip44_ciphertext_b64]`.
-fn build_request(master_pk: &[u8; 32], client_pk: &[u8; 32], ck: &[u8; 32], json: &str) -> Vec<u8> {
-    let nonce = nip44::synthetic_nonce(&CLIENT_SECRET, master_pk, json);
+fn build_request_as(
+    client_secret: &[u8; 32],
+    master_pk: &[u8; 32],
+    client_pk: &[u8; 32],
+    ck: &[u8; 32],
+    json: &str,
+) -> Vec<u8> {
+    let nonce = nip44::synthetic_nonce(client_secret, master_pk, json);
     let ct = nip44::encrypt(ck, json, &nonce).expect("nip44 encrypt");
     let mut payload = Vec::with_capacity(72 + ct.len());
     payload.extend_from_slice(master_pk);
@@ -106,6 +181,10 @@ fn build_request(master_pk: &[u8; 32], client_pk: &[u8; 32], ck: &[u8; 32], json
     payload.extend_from_slice(&CREATED_AT.to_be_bytes());
     payload.extend_from_slice(ct.as_bytes());
     payload
+}
+
+fn build_request(master_pk: &[u8; 32], client_pk: &[u8; 32], ck: &[u8; 32], json: &str) -> Vec<u8> {
+    build_request_as(&CLIENT_SECRET, master_pk, client_pk, ck, json)
 }
 
 /// Verify the kind:24133 envelope (id + BIP-340 sig under the master key) and
@@ -178,7 +257,7 @@ fn main() {
     assert_eq!(resp["result"].as_str(), Some(hex_encode(&device_pk).as_str()));
     println!("PASS 2: NIP-46 get_public_key round trip (envelope sig + NIP-44 both verified)");
 
-    // --- 3. sign_event as master --------------------------------------------
+    // --- 3. sign_event as master, gated by on-device TOFU approval ----------
     let inner = serde_json::json!({
         "kind": 1,
         "created_at": CREATED_AT,
@@ -191,7 +270,11 @@ fn main() {
         "method": "sign_event",
         "params": [inner.to_string()],
     });
+    // First signing from this client: the device blocks on its approval
+    // screen; walk the buttons to Approve while the APDU is in flight.
+    let clicker = automation::resolve_prompt("Approve");
     let envelope = dev.process(&build_request(&device_pk, &client_pk, &ck, &req.to_string()));
+    clicker.join().expect("approval clicker");
     let resp = open_envelope(&envelope, &device_pk, &ck);
     let signed: serde_json::Value =
         serde_json::from_str(resp["result"].as_str().expect("sign result")).unwrap();
@@ -206,7 +289,7 @@ fn main() {
     let id = nip46::compute_event_id(&ev);
     assert_eq!(hex_encode(&id), signed["id"].as_str().unwrap(), "inner id");
     verify_bip340(&device_pk, &id, signed["sig"].as_str().unwrap());
-    println!("PASS 3: sign_event as master — inner id + BIP-340 sig verified");
+    println!("PASS 3: sign_event as master — on-device approval walked, id + BIP-340 sig verified");
 
     // --- 4. nsec-tree persona: derive, switch, sign --------------------------
     let tree = create_tree_root(&root).unwrap();
@@ -256,7 +339,39 @@ fn main() {
     let id = nip46::compute_event_id(&ev);
     assert_eq!(hex_encode(&id), signed["id"].as_str().unwrap(), "persona inner id");
     verify_bip340(&expected_persona.public_key, &id, signed["sig"].as_str().unwrap());
-    println!("PASS 4: persona derive/switch/sign — matches host derivation, sig verified");
+    println!(
+        "PASS 4: persona derive/switch/sign — NO buttons pressed (TOFU auto-sign), sig verified"
+    );
 
-    println!("\nALL PASS — heartwood identity + NIP-46 + NIP-44 + nsec-tree proven on Ledger (Speculos)");
+    // --- 5. an unknown client is rejected on-device --------------------------
+    let stranger_secret = [9u8; 32];
+    let stranger_pk: [u8; 32] = SigningKey::from_bytes(&stranger_secret)
+        .unwrap()
+        .verifying_key()
+        .to_bytes()
+        .into();
+    let stranger_ck =
+        nip44::get_conversation_key(&stranger_secret, &device_pk).expect("stranger ck");
+    let req = serde_json::json!({
+        "id": "t6",
+        "method": "sign_event",
+        "params": [inner.to_string()],
+    });
+    let clicker = automation::resolve_prompt("Reject");
+    let envelope = dev.process(&build_request_as(
+        &stranger_secret,
+        &device_pk,
+        &stranger_pk,
+        &stranger_ck,
+        &req.to_string(),
+    ));
+    clicker.join().expect("reject clicker");
+    let resp = open_envelope(&envelope, &device_pk, &stranger_ck);
+    let err = resp["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| resp["error"].as_str().expect("error response"));
+    assert!(err.contains("denied"), "expected denial, got: {resp}");
+    println!("PASS 5: unknown client rejected on-device — signed denial envelope verified");
+
+    println!("\nALL PASS — identity, NIP-46/44, personas AND on-device approval proven on Ledger (Speculos)");
 }

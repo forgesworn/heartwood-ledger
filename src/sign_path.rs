@@ -12,10 +12,12 @@
 //! *active identity*: an explicit per-request `heartwood` context wins, else the
 //! client's switched-to persona (session state), else the master account.
 //!
-//! PoC note: `sign_event` auto-approves — the unattended-bunker model, matching
-//! the ESP signers' device-side policy engine (which is the next port target).
-//! A per-event NBGL confirmation belongs in front of `do sign` before this app
-//! goes anywhere near review.
+//! Signing policy (the Heartwood TOFU model, see `approvals`): the first
+//! `sign_event` from an unknown client blocks on an on-device NBGL approval —
+//! the `approve` callback, provided by `main`, mirrors the ESP8266's physical
+//! button hold. Once approved, the client is TOFU-authorised in NVM and signs
+//! unattended (the bunker model). Non-signing methods are the connect-safe
+//! tier and never prompt.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -34,12 +36,13 @@ const NIP46_KIND: u64 = 24133;
 /// `[master_pk 32][client_pk 32][created_at u64-be 8][nip44_ciphertext_b64]`.
 /// Returns the fully-signed kind:24133 event JSON (the `0x35` body), or `None`
 /// to NACK (decrypt failure, bad request, sign failure).
-pub fn handle(
+pub fn handle<F: FnMut(&[u8; 32], u64) -> bool>(
     seed: &[u8; 32],
     mode: u8,
     payload: &[u8],
     cache: &mut IdentityCache,
     sessions: &mut Sessions,
+    approve: &mut F,
 ) -> Option<String> {
     if payload.len() < 72 {
         return None;
@@ -67,6 +70,7 @@ pub fn handle(
         &client_pk,
         cache,
         sessions,
+        approve,
     )?;
 
     // 3. Re-encrypt the response under the same conversation key, with a
@@ -98,7 +102,7 @@ pub fn handle(
 
 /// Resolve the active identity for the request, then route the NIP-46 method.
 #[allow(clippy::too_many_arguments)]
-fn dispatch(
+fn dispatch<F: FnMut(&[u8; 32], u64) -> bool>(
     request_json: &str,
     seed: &[u8; 32],
     mode: u8,
@@ -107,6 +111,7 @@ fn dispatch(
     client_pk: &[u8; 32],
     cache: &mut IdentityCache,
     sessions: &mut Sessions,
+    approve: &mut F,
 ) -> Option<String> {
     let req = nip46::parse_request(request_json.as_bytes()).ok()?;
 
@@ -124,7 +129,7 @@ fn dispatch(
         "get_public_key" => get_public_key(&req, seed, mode, master_pubkey_hex, &ctx),
         "connect" => nip46::build_connect_response(&req.id).ok(),
         "ping" => nip46::build_ping_response(&req.id).ok(),
-        "sign_event" => sign_event(&req, seed, mode, master_pubkey_hex, &ctx),
+        "sign_event" => sign_event(&req, seed, mode, master_pubkey_hex, &ctx, client_pk, approve),
         "nip44_encrypt" => nip44_encrypt(&req, seed, mode, &ctx),
         "nip44_decrypt" => nip44_decrypt(&req, seed, mode, &ctx),
         "heartwood_derive_persona" => derive_persona(&req, seed, mode, cache),
@@ -156,18 +161,28 @@ fn get_public_key(
 }
 
 /// `sign_event` — signs the INNER event as the resolved identity (master or
-/// persona). PoC: auto-approved (see module note).
-fn sign_event(
+/// persona). An unknown client blocks on the on-device approval callback;
+/// denial still produces a signed envelope carrying the error, exactly like
+/// the ESP8266's button-denial path.
+fn sign_event<F: FnMut(&[u8; 32], u64) -> bool>(
     req: &Nip46Request,
     seed: &[u8; 32],
     mode: u8,
     master_pubkey_hex: &str,
     ctx: &Option<(String, u32)>,
+    client_pk: &[u8; 32],
+    approve: &mut F,
 ) -> Option<String> {
     let mut ev = match nip46::parse_unsigned_event(&req.params) {
         Ok(ev) => ev,
         Err(e) => return nip46::build_error_response(&req.id, -32602, &e).ok(),
     };
+
+    // Physical-approval gate: the host can deliver a sign request but cannot
+    // approve it. `approve` returns immediately for TOFU-approved clients.
+    if !approve(client_pk, ev.kind) {
+        return nip46::build_error_response(&req.id, -32000, "denied at device").ok();
+    }
 
     let (secret, pubkey_hex) = match ctx {
         None => (*seed, master_pubkey_hex.to_string()),

@@ -20,6 +20,7 @@
 #![no_std]
 #![no_main]
 
+mod approvals;
 mod crypto;
 mod identity;
 mod seed;
@@ -200,16 +201,22 @@ fn handle_apdu<'a>(
                 return Ok(command.into_response());
             }
 
-            // Last chunk: derive, dispatch, stash the signed envelope.
+            // Last chunk: derive and dispatch. `sign_event` from a client not
+            // yet TOFU-approved blocks here on the NBGL approval screen.
+            let comm = command.into_comm();
             let master = seed::master_secret().ok_or(AppSW::KeyDeriveFail)?;
+            let mut approve =
+                |client_pk: &[u8; 32], kind: u64| ui::approve_signing(comm, client_pk, kind);
             let json = sign_path::handle(
                 &master,
                 MasterMode::TreeMnemonic as u8,
                 &state.buf,
                 &mut state.cache,
                 &mut state.sessions,
+                &mut approve,
             )
             .ok_or(AppSW::ProcessFail)?;
+            drop(approve);
             state.buf.clear();
             state.next_chunk = 0;
 
@@ -217,7 +224,7 @@ fn handle_apdu<'a>(
             let len = (bytes.len() as u16).to_be_bytes();
             state.result = Some(bytes);
 
-            let mut response = command.into_response();
+            let mut response = comm.begin_response();
             response.append(&len)?;
             Ok(response)
         }

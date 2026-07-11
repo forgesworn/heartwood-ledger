@@ -22,7 +22,7 @@ docker run --rm -v "$WS_DIR":/ws -w /ws/heartwood-ledger $CACHE "$BUILDER" \
 echo "== speculos up =="
 docker rm -f heartwood-speculos >/dev/null 2>&1 || true
 docker run --rm -d --name heartwood-speculos \
-  -v "$WS_DIR":/ws -p 9999:9999 "$SPECULOS" \
+  -v "$WS_DIR":/ws -p 9999:9999 -p 5001:5000 "$SPECULOS" \
   --model nanosp --display headless --apdu-port 9999 \
   --seed "$SEED" "/ws/heartwood-ledger/$ELF"
 trap 'docker rm -f heartwood-speculos >/dev/null 2>&1 || true' EXIT
@@ -34,4 +34,5 @@ for _ in $(seq 1 30); do
 done
 
 echo "== host driver =="
-(cd host && cargo run --release)
+# 5001 on the host: macOS AirPlay squats 5000.
+(cd host && SPECULOS_API=127.0.0.1:5001 cargo run --release)
