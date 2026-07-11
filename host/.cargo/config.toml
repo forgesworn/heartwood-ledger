@@ -1,0 +1,4 @@
+# Override the app crate's default `nanosplus` target (cargo merges configs
+# from parent directories) — the driver runs on the host.
+[build]
+target = "x86_64-apple-darwin"

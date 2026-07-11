@@ -129,7 +129,7 @@ extern "C" fn sample_main() {
     comm.set_expected_cla(0xe0);
 
     let mut state = AppState::new();
-    let home = ui::menu_main(comm);
+    let mut home = ui::menu_main(comm);
     home.show_and_return();
 
     loop {
