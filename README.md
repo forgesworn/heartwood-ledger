@@ -60,7 +60,7 @@ The Heartwood TOFU model, on Ledger buttons: non-signing methods (`get_public_ke
 encrypt/decrypt) are the connect-safe tier and never prompt. The **first `sign_event` from an
 unknown client** blocks on an Approve/Reject choice screen showing the client npub prefix and the
 event kind; approval stores the client in app NVM and grants unattended signing thereafter — the
-bunker model. Signing itself runs on the OS's `cx_ecschnorr` syscall (the taproot path), not in
+bunker model. Every curve operation runs on the OS's cx syscalls (the taproot path), not in
 app RAM.
 
 ## Using it with the bridge
@@ -75,14 +75,15 @@ No `bridge.secret` — a Ledger authenticates its user (PIN) and gates signing o
 
 ## Remaining caveats
 
-- **Not yet run on a physical Nano S+** — sideload + bench test is the next gate. USB HID transport
-  for the bridge is likewise bench-gated (Speculos speaks TCP).
-- **Derivation and NIP-44 ECDH still use `k256` in app RAM** (signing does not). Moving them onto
-  cx syscalls means a `ledger-backend` feature in `heartwood-common` — the remaining pre-review
-  hardening step.
+- **Not yet run on a physical Nano S+** — sideload + bench test is the next gate. The bridge's USB
+  HID transport (`ledger-hid`, hand-rolled hidraw) is framing-tested but likewise bench-gated.
 - **24 KB heap** bounds the maximum event size well below the ESP32's.
 - **Sideload only** (Nano S/S+). Distribution to Nano X/Stax/Flex requires Ledger's review and a
   paid third-party security audit.
+
+All curve operations — pubkey derivation, BIP-340 signing, NIP-44 ECDH (including the even-y lift
+of the peer key) — run through the OS's cx syscalls via `heartwood-common`'s `ledger-backend`
+feature (branch `ledger-backend` in heartwood-esp32); `k256` is no longer in the app at all.
 
 ## Licence
 

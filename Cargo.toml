@@ -9,9 +9,7 @@ license = "MIT"
 
 [dependencies]
 ledger_device_sdk = { version = "*", features = ["io_new"] }
-ledger_secure_sdk_sys = "1.16"
-heartwood-common = { path = "../heartwood-esp32/common", default-features = false, features = ["k256-backend", "nip44", "nip46"] }
-k256 = { version = "0.13", default-features = false, features = ["schnorr", "arithmetic", "ecdh"] }
+heartwood-common = { path = "../heartwood-esp32/common", default-features = false, features = ["ledger-backend", "nip44", "nip46"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 zeroize = { version = "1", default-features = false }
 
