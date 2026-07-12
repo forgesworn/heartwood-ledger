@@ -10,9 +10,10 @@ SPECULOS="ghcr.io/ledgerhq/speculos:latest"
 SEED="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 ELF="target/nanosplus/release/heartwood-ledger"
 
-## Reuse the host's crate cache (populated by `cargo fetch`) so the container
-## downloads nothing — this network drops large transfers. The builder image
-## keeps CARGO_HOME at /opt/.cargo.
+## Reuse the host's crate cache so the container downloads as little as
+## possible. The builder image keeps CARGO_HOME at /opt/.cargo. Pre-create the
+## directory so docker doesn't create it root-owned on a fresh machine/runner.
+mkdir -p "$HOME/.cargo/registry"
 CACHE="-v $HOME/.cargo/registry:/opt/.cargo/registry"
 
 echo "== build =="
@@ -27,9 +28,10 @@ docker run --rm -d --name heartwood-speculos \
   --seed "$SEED" "/ws/heartwood-ledger/$ELF"
 trap 'docker rm -f heartwood-speculos >/dev/null 2>&1 || true' EXIT
 
-# Wait for the APDU port to accept connections.
+# Wait for the APDU port to accept connections (bash /dev/tcp — no netcat
+# dependency, works on macOS bash 3.2 and CI runners alike).
 for _ in $(seq 1 30); do
-  if nc -z 127.0.0.1 9999 2>/dev/null; then break; fi
+  if (exec 3<>/dev/tcp/127.0.0.1/9999) 2>/dev/null; then exec 3>&- 3<&-; break; fi
   sleep 1
 done
 

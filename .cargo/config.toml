@@ -1,8 +1,8 @@
+# No [build] target default: `cargo ledger build <device>` passes the target
+# itself, and a default here would leak into the nested `host/` crate (cargo
+# merges configs from parent directories), breaking native builds.
 [target.nanosplus]
 runner = "speculos -m nanosp"
-
-[build]
-target = "nanosplus"
 
 [profile.release]
 opt-level = 'z'

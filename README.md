@@ -1,5 +1,6 @@
 # heartwood-ledger
 
+[![CI](https://github.com/forgesworn/heartwood-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/forgesworn/heartwood-ledger/actions/workflows/ci.yml)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/TheCryptoDonkey?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/TheCryptoDonkey)
 
 > **Working prototype — emulator-proven, not yet bench-tested on hardware.** Part of the

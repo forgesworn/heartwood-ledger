@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Server-side enforcement of the check-in identity rule: the local pre-commit
+  # hook can be bypassed with --no-verify, this gate cannot. The banned string is
+  # assembled at runtime so this file stays clean and never trips its own check.
+  identity-guard:
+    name: identity-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Forbid the banned commit identity
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          banned="$(printf 'd%s' 'bowles')"
+          fail=0
+          if git grep -nIi "$banned" -- .; then
+            echo "::error::tracked content contains the banned identity"
+            fail=1
+          fi
+          if [ -n "${BASE:-}" ] && [ -n "${HEAD:-}" ]; then
+            range="$BASE..$HEAD"
+          else
+            range="HEAD"
+          fi
+          if git log --format='%an %ae %cn %ce' "$range" | grep -qi "$banned"; then
+            echo "::error::a commit in range uses the banned identity"
+            fail=1
+          fi
+          exit "$fail"
+
+  # The whole proof in one job: build the app for Nano S+ in Ledger's builder
+  # container, boot it in Speculos seeded with the canonical all-zero phrase,
+  # and run the host interop driver against it (derivation vector, NIP-46/44
+  # round trips, TOFU approval walked via the Speculos REST API).
+  e2e:
+    name: Build + Speculos e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: heartwood-ledger
+      # Sibling checkout: heartwood-common is a path dependency
+      # (../heartwood-esp32/common), shared unmodified with the ESP signers.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: forgesworn/heartwood-esp32
+          path: heartwood-esp32
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: heartwood-ledger/host
+      - run: ./scripts/e2e.sh
+        working-directory: heartwood-ledger
