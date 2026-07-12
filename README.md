@@ -1,5 +1,7 @@
 # heartwood-ledger
 
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/TheCryptoDonkey?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/TheCryptoDonkey)
+
 > **Working prototype — emulator-proven, not yet bench-tested on hardware.** Part of the
 > [ForgeSworn identity stack](https://github.com/forgesworn) — the
 > [Heartwood](https://github.com/forgesworn/heartwood) hardware Nostr signer, running as a
