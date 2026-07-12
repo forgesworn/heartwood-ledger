@@ -70,3 +70,7 @@ jobs:
           workspaces: heartwood-ledger/host
       - run: ./scripts/e2e.sh
         working-directory: heartwood-ledger
+        env:
+          # The builder container runs as root; keep its crate cache away from
+          # the runner's ~/.cargo/registry (which host cargo must own).
+          HEARTWOOD_LEDGER_REGISTRY_CACHE: /tmp/heartwood-ledger-registry

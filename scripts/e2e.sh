@@ -10,11 +10,13 @@ SPECULOS="ghcr.io/ledgerhq/speculos:latest"
 SEED="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 ELF="target/nanosplus/release/heartwood-ledger"
 
-## Reuse the host's crate cache so the container downloads as little as
-## possible. The builder image keeps CARGO_HOME at /opt/.cargo. Pre-create the
-## directory so docker doesn't create it root-owned on a fresh machine/runner.
-mkdir -p "$HOME/.cargo/registry"
-CACHE="-v $HOME/.cargo/registry:/opt/.cargo/registry"
+## Crate cache for the build container (its CARGO_HOME is /opt/.cargo).
+## Defaults to the host registry so local runs download nothing, but the
+## container runs as root — on CI, point HEARTWOOD_LEDGER_REGISTRY_CACHE at a
+## scratch dir instead, or root-owned files poison the runner's own registry.
+CONTAINER_CACHE="${HEARTWOOD_LEDGER_REGISTRY_CACHE:-$HOME/.cargo/registry}"
+mkdir -p "$CONTAINER_CACHE"
+CACHE="-v $CONTAINER_CACHE:/opt/.cargo/registry"
 
 echo "== build =="
 docker run --rm -v "$WS_DIR":/ws -w /ws/heartwood-ledger $CACHE "$BUILDER" \
