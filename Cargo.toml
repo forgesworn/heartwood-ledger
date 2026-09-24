@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "Heartwood Nostr signer as a Ledger embedded app — NIP-46 dispatch, NIP-44, nsec-tree personas on the secure element's seed"
 license = "MIT"
+keywords = ["nostr", "ledger", "nip-46", "nip-44", "signer"]
+repository = "https://github.com/forgesworn/heartwood-ledger"
 
 [workspace]
 
