@@ -1,0 +1,63 @@
+# heartwood-ledger
+
+> Running a Nostr signer means trusting a daemon or an ESP32 with your key.
+> heartwood-ledger moves that trust boundary onto a Ledger Nano S+/X: NIP-44
+> decrypt, NIP-46 dispatch and kind:24133 envelope signing all happen inside
+> the secure element, gated by on-device approval.
+
+It is for people already running the [Heartwood](https://github.com/forgesworn/heartwood)
+Nostr signer stack who want the ESP32/ESP8266 hardware replaced with a Ledger
+they may already own. It shares its NIP-44, NIP-46, derivation and identity
+logic with the ESP32 firmware through the `heartwood-common` crate, compiled
+unmodified for the Ledger target, so restoring a Heartwood seed phrase through
+Ledger's own onboarding produces the identical npub and
+[nsec-tree](https://github.com/forgesworn/nsec-tree) personas.
+
+## Getting Started
+
+Build and prove the app with Docker (no local Ledger toolchain install):
+
+```sh
+git clone https://github.com/forgesworn/heartwood-ledger
+git clone https://github.com/forgesworn/heartwood-esp32   # sibling checkout, path dependency
+cd heartwood-ledger
+./scripts/e2e.sh
+```
+
+`scripts/e2e.sh` builds the app for Nano S+, boots it in Speculos seeded with
+the canonical all-zero test phrase, and runs the host interop driver against
+it. Sideloading onto a physical device is not yet covered; see README.md.
+
+## Key Concepts
+
+- **Same identity as the ESP firmware.** The master key is the BIP-32 node at
+  `m/44'/1237'/727'/0'/0'`, the path the ESP firmware, provision CLI and
+  sapwood all derive from.
+- **TOFU signing policy.** Non-signing methods (`get_public_key`, NIP-44/04
+  encrypt/decrypt) never prompt. The first `sign_event` from an unknown client
+  blocks on an on-device Approve/Reject screen; approval stores the client and
+  grants unattended signing thereafter.
+- **Keys never leave the device.** Derivation goes through
+  `os_perso_derive_node_bip32`; the OS restricts the app to the `44'/1237'`
+  subtree.
+
+## API Surface
+
+The app exposes an APDU protocol (CLA `0xE0`), documented in `src/main.rs`:
+
+- `GET_VERSION` (`0x03`): returns `[major, minor, patch]`.
+- `GET_APP_NAME` (`0x04`): returns `b"Heartwood"`.
+- `GET_PUBKEY` (`0x05`): returns the 32-byte x-only master pubkey.
+- `PROCESS` (`0x10`, chunked): accumulates an `ENCRYPTED_REQUEST` body across
+  chunks; on the last chunk, decrypts, dispatches the NIP-46 request and signs
+  the response envelope.
+- `GET_RESULT` (`0x11`, chunked): reads back the `SIGN_ENVELOPE_RESPONSE` JSON.
+
+`heartwood-bridge` (branch `ledger-transport`) speaks this protocol directly
+over TCP or USB HID; see README.md "Using it with the bridge".
+
+## Optional
+
+- Full protocol and signing policy detail: [README.md](README.md)
+- Contributing and development commands: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Responsible disclosure: [SECURITY.md](SECURITY.md)
