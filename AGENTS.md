@@ -1,7 +1,9 @@
 # heartwood-ledger
 
-A Heartwood Nostr signer built as a Ledger embedded app (`no_std`, sideload on
-Nano S+/X). It receives an encrypted request over chunked APDUs, does NIP-44
+A Heartwood Nostr signer built as a Ledger embedded app (`no_std`, sideload
+only; Nano S+ is the only device built and proven, Nano X is listed in
+`ledger_app.toml` but untested). Emulator-proven (Speculos), not yet run on a
+physical device. It receives an encrypted request over chunked APDUs, does NIP-44
 decrypt, NIP-46 dispatch and kind:24133 envelope signing on-device, and returns
 the signed result over chunked APDUs. Key material derives from the Ledger's
 own seed at `m/44'/1237'/727'/0'/0'` and never leaves the device. Shares its
@@ -15,7 +17,7 @@ checkout).
 |---------|---------|
 | `./scripts/e2e.sh` | Build for Nano S+, boot Speculos, run the host interop driver: the gate for any change |
 | `docker run --rm -v "$(dirname "$PWD")":/ws -w /ws/heartwood-ledger ghcr.io/ledgerhq/ledger-app-builder/ledger-app-builder:latest cargo ledger build nanosplus` | Build only |
-| `cd host && cargo run --release` | Run the host driver against an already-running Speculos |
+| `cd host && cargo run --release` | Run the host driver against an already-running Speculos (APDU port `SPECULOS_ADDR`, default `127.0.0.1:9999`; REST API `SPECULOS_API`, default `127.0.0.1:5000`) |
 
 Build and e2e need Docker (the Ledger toolchain and Speculos run in
 containers) and a sibling `heartwood-esp32` checkout, since
@@ -28,7 +30,7 @@ src/            App source (no_std): main.rs (APDU dispatch), sign_path.rs
                 (NIP-44/46 dispatch loop), identity.rs, seed.rs, crypto.rs,
                 approvals.rs (TOFU approval state), ui.rs (NBGL screens)
 host/           Host interop driver (cargo crate): exercises the app over
-                Speculos's TCP APDU port
+                Speculos's TCP APDU port and presses buttons via its REST API
 scripts/e2e.sh  Build + Speculos + host driver, in one script
 icons/, glyphs/ App icon source and processed glyphs (build.rs decodes GIFs
                 to PNG at build time)
@@ -52,7 +54,7 @@ ledger_app.toml Ledger app manifest (device targets, SDK)
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | APDU instruction set (`GET_VERSION`, `GET_APP_NAME`, `GET_PUBKEY`, `PROCESS`, `GET_RESULT`) and request dispatch |
+| `src/main.rs` | APDU instruction set (`GET_VERSION`, `GET_APP_NAME`, `GET_PUBKEY`, `PROCESS`, `GET_RESULT`), status words (`AppSW`) and request dispatch; summarised in the README "APDU protocol" section |
 | `src/sign_path.rs` | NIP-44 decrypt, NIP-46 dispatch, re-encrypt, envelope signing |
 | `Cargo.toml` | `[package.metadata.ledger]` declares the BIP-32 path (`44'/1237'`), curve and device icons |
 | `host/src/main.rs` | Interop driver: derivation vector, NIP-46 round trips, TOFU approval walk |
@@ -60,10 +62,17 @@ ledger_app.toml Ledger app manifest (device targets, SDK)
 ## Common Pitfalls
 
 - `heartwood-common` must resolve as `../heartwood-esp32/common`; clone
-  `heartwood-esp32` as a sibling directory before building.
+  `heartwood-esp32` as a sibling directory before building. Its default branch
+  (`main`) already carries the `ledger-backend` feature, which is what CI
+  checks out; there is no `ledger-backend` branch to switch to.
 - The app has a 24 KB heap; `MAX_REQUEST` in `src/main.rs` bounds accumulated
   request size well below what the ESP32 build accepts.
-- Sideload only (Nano S/S+); Nano X/Stax/Flex distribution needs Ledger's
-  review and a paid third-party security audit.
+- Sideload only; Nano S+ is the only device `e2e.sh` and CI build. Nano X,
+  Stax and Flex distribution needs Ledger's review and a paid third-party
+  security audit.
+- The host driver needs two Speculos ports: the APDU port (`SPECULOS_ADDR`,
+  default `127.0.0.1:9999`) and the REST API it uses to press buttons for the
+  approval prompts (`SPECULOS_API`, default `127.0.0.1:5000`). `e2e.sh`
+  publishes the API as 5001 because macOS AirPlay occupies 5000.
 - Do not add the `image` crate; `build.rs` decodes glyph GIFs with `gif` and
   `png` directly to keep the build lean.
