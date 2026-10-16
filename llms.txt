@@ -1,9 +1,13 @@
 # heartwood-ledger
 
 > Running a Nostr signer means trusting a daemon or an ESP32 with your key.
-> heartwood-ledger moves that trust boundary onto a Ledger Nano S+/X: NIP-44
+> heartwood-ledger moves that trust boundary onto a Ledger Nano S+: NIP-44
 > decrypt, NIP-46 dispatch and kind:24133 envelope signing all happen inside
 > the secure element, gated by on-device approval.
+>
+> Prototype: emulator-proven (Speculos), not yet run on a physical device;
+> sideload only. Nano S+ is the only target built and tested; Nano X is listed
+> in the manifest but untested, and Stax and Flex are not targeted.
 
 It is for people already running the [Heartwood](https://github.com/forgesworn/heartwood)
 Nostr signer stack who want the ESP32/ESP8266 hardware replaced with a Ledger
@@ -43,21 +47,30 @@ it. Sideloading onto a physical device is not yet covered; see README.md.
 
 ## API Surface
 
-The app exposes an APDU protocol (CLA `0xE0`), documented in `src/main.rs`:
+The app exposes an APDU protocol (CLA `0xE0`), documented in `src/main.rs` and
+in the README.md "APDU protocol" section (P1/P2 flags, status words, framing):
 
 - `GET_VERSION` (`0x03`): returns `[major, minor, patch]`.
 - `GET_APP_NAME` (`0x04`): returns `b"Heartwood"`.
 - `GET_PUBKEY` (`0x05`): returns the 32-byte x-only master pubkey.
-- `PROCESS` (`0x10`, chunked): accumulates an `ENCRYPTED_REQUEST` body across
-  chunks; on the last chunk, decrypts, dispatches the NIP-46 request and signs
-  the response envelope.
-- `GET_RESULT` (`0x11`, chunked): reads back the `SIGN_ENVELOPE_RESPONSE` JSON.
+- `PROCESS` (`0x10`, chunked): P1 is the chunk index from 0, P2 is `0x80` for
+  more chunks and `0x00` for the last; the host driver sends 250-byte chunks
+  (APDU limit 255) and the app enforces an 8 KiB total. It accumulates an `ENCRYPTED_REQUEST` body; on the last chunk it
+  decrypts, dispatches the NIP-46 request, signs the response envelope and
+  replies with the result length as a big-endian `u16`.
+- `GET_RESULT` (`0x11`, chunked): P1 is the chunk index from 0; each reply is
+  the next slice of up to 250 bytes of the `SIGN_ENVELOPE_RESPONSE` JSON. Read
+  until you hold the length from `PROCESS`; a chunk index past the end returns
+  `0xB013`.
+
+An on-device Reject is not a status word: `PROCESS` returns `0x9000` and the
+signed envelope carries the NIP-46 error `-32000` `denied at device`.
 
 `heartwood-bridge` (branch `ledger-transport`) speaks this protocol directly
 over TCP or USB HID; see README.md "Using it with the bridge".
 
 ## Optional
 
-- Full protocol and signing policy detail: [README.md](README.md)
+- APDU protocol, status words and signing policy: [README.md](README.md); layout source of truth: `src/main.rs`
 - Contributing and development commands: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Responsible disclosure: [SECURITY.md](SECURITY.md)
